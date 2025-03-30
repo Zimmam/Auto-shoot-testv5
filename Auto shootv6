@@ -1,0 +1,93 @@
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+-- Local player setup
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+-- Simple GUI toggle
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AutoTapGUI"
+screenGui.Parent = player.PlayerGui
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Name = "ToggleButton"
+toggleButton.Size = UDim2.new(0, 120, 0, 50)
+toggleButton.Position = UDim2.new(0.5, -60, 1, -60)
+toggleButton.AnchorPoint = Vector2.new(0.5, 0.5)
+toggleButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+toggleButton.Text = "AUTO: OFF"
+toggleButton.TextColor3 = Color3.new(1, 1, 1)
+toggleButton.Font = Enum.Font.SourceSansBold
+toggleButton.TextSize = 18
+toggleButton.Parent = screenGui
+
+-- Settings
+local autoTapEnabled = false
+local lastTapTime = 0
+local tapInterval = 0.2 -- seconds between taps
+
+-- Toggle button functionality
+toggleButton.MouseButton1Click:Connect(function()
+    autoTapEnabled = not autoTapEnabled
+    toggleButton.BackgroundColor3 = autoTapEnabled and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
+    toggleButton.Text = autoTapEnabled and "AUTO: ON" or "AUTO: OFF"
+end)
+
+-- Basic visibility check
+local function isEnemyVisible(enemy)
+    local enemyRoot = enemy:FindFirstChild("HumanoidRootPart") or enemy:FindFirstChild("Head")
+    if not enemyRoot then return false end
+    
+    local camera = Workspace.CurrentCamera
+    local screenPos, onScreen = camera:WorldToScreenPoint(enemyRoot.Position)
+    
+    return onScreen
+end
+
+-- Simple tap simulation
+local function simulateTap()
+    -- Simulate tap at screen center (adjust if needed)
+    local tapPosition = Vector2.new(0.5, 0.5) -- Normalized screen position (center)
+    
+    -- Begin touch
+    UserInputService:SimulateTouchEvent(1, Enum.UserInputState.Begin, tapPosition)
+    
+    -- End touch (very short press)
+    task.wait(0.01)
+    UserInputService:SimulateTouchEvent(1, Enum.UserInputState.End, tapPosition)
+    
+    print("Simulated tap at:", tapPosition)
+end
+
+-- Main loop
+RunService.Heartbeat:Connect(function()
+    if not autoTapEnabled then return end
+    if not character or not humanoid or humanoid.Health <= 0 then return end
+    
+    -- Throttle taps
+    local now = os.clock()
+    if now - lastTapTime < tapInterval then return end
+    lastTapTime = now
+    
+    -- Check for visible enemies
+    for _, otherPlayer in pairs(Players:GetPlayers()) do
+        if otherPlayer ~= player and otherPlayer.Character then
+            local enemy = otherPlayer.Character
+            if isEnemyVisible(enemy) then
+                simulateTap()
+                break -- Only tap once per check
+            end
+        end
+    end
+end)
+
+-- Handle character respawns
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+    humanoid = character:WaitForChild("Humanoid")
+end)
