@@ -1,0 +1,162 @@
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+
+-- Local player setup
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+-- GUI Setup
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AutoShootGUI"
+screenGui.Parent = player.PlayerGui
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Name = "ToggleButton"
+toggleButton.Size = UDim2.new(0, 100, 0, 50)
+toggleButton.Position = UDim2.new(0.5, -50, 1, -60)
+toggleButton.AnchorPoint = Vector2.new(0.5, 0.5)
+toggleButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+toggleButton.Text = "AUTO: OFF"
+toggleButton.TextColor3 = Color3.new(1, 1, 1)
+toggleButton.Font = Enum.Font.SourceSansBold
+toggleButton.TextSize = 18
+toggleButton.Parent = screenGui
+
+-- Settings
+local settings = {
+    Enabled = false,
+    CheckInterval = 0.1, -- seconds between checks
+    MaxDistance = 100, -- studs
+    DebugMode = true -- shows rays in workspace
+}
+
+-- Debug visualization
+local function debugRay(startPos, endPos, hit)
+    if not settings.DebugMode then return end
+    
+    local part = Instance.new("Part")
+    part.Size = Vector3.new(0.2, 0.2, (startPos - endPos).Magnitude)
+    part.CFrame = CFrame.new(startPos, endPos) * CFrame.new(0, 0, -part.Size.Z/2)
+    part.Anchored = true
+    part.CanCollide = false
+    part.Color = hit and Color3.new(0, 1, 0) or Color3.new(1, 0, 0)
+    part.Transparency = 0.7
+    part.Parent = Workspace
+    
+    game:GetService("Debris"):AddItem(part, 1)
+end
+
+-- Toggle button functionality
+local function updateButtonAppearance()
+    if settings.Enabled then
+        toggleButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
+        toggleButton.Text = "AUTO: ON"
+        
+        -- Button animation
+        local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local tween = TweenService:Create(toggleButton, tweenInfo, {Size = UDim2.new(0, 110, 0, 55)})
+        tween:Play()
+        tween.Completed:Wait()
+        tween = TweenService:Create(toggleButton, tweenInfo, {Size = UDim2.new(0, 100, 0, 50)})
+        tween:Play()
+    else
+        toggleButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+        toggleButton.Text = "AUTO: OFF"
+    end
+end
+
+toggleButton.MouseButton1Click:Connect(function()
+    settings.Enabled = not settings.Enabled
+    updateButtonAppearance()
+end)
+
+-- Improved visibility check
+local function isEnemyVisible(enemy)
+    if not character or not rootPart then return false end
+    
+    local enemyRoot = enemy:FindFirstChild("HumanoidRootPart")
+    if not enemyRoot then return false end
+
+    -- Distance check
+    local distance = (rootPart.Position - enemyRoot.Position).Magnitude
+    if distance > settings.MaxDistance then return false end
+
+    -- Direction check
+    local direction = (enemyRoot.Position - rootPart.Position).Unit
+    local ray = Ray.new(rootPart.Position, direction * settings.MaxDistance)
+
+    -- Ignore list
+    local ignoreList = {character}
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            table.insert(ignoreList, part)
+        end
+    end
+
+    local hit, position = Workspace:FindPartOnRayWithIgnoreList(ray, ignoreList)
+    
+    -- Debug visualization
+    debugRay(rootPart.Position, position, hit and hit:IsDescendantOf(enemy))
+    
+    return hit and hit:IsDescendantOf(enemy)
+end
+
+-- More reliable tap simulation
+local function simulateTapOnEnemy(enemy)
+    local enemyRoot = enemy:FindFirstChild("HumanoidRootPart")
+    if not enemyRoot then return end
+
+    local camera = Workspace.CurrentCamera
+    local screenPosition, onScreen = camera:WorldToScreenPoint(enemyRoot.Position)
+    
+    if onScreen then
+        -- First touch begin
+        local touchEvent = {
+            Position = Vector2.new(screenPosition.X, screenPosition.Y),
+            UserInputType = Enum.UserInputType.Touch,
+            UserInputState = Enum.UserInputState.Begin
+        }
+        UserInputService:SimulateTouchEvent(touchEvent)
+        
+        -- Small delay (important for some games)
+        wait(0.05)
+        
+        -- Then touch end
+        touchEvent.UserInputState = Enum.UserInputState.End
+        UserInputService:SimulateTouchEvent(touchEvent)
+    end
+end
+
+-- Main loop with cooldown
+local lastCheck = 0
+RunService.Heartbeat:Connect(function(deltaTime)
+    if not settings.Enabled then return end
+    if not character or not rootPart then return end
+    
+    lastCheck = lastCheck + deltaTime
+    if lastCheck < settings.CheckInterval then return end
+    lastCheck = 0
+    
+    for _, otherPlayer in pairs(Players:GetPlayers()) do
+        if otherPlayer ~= player and otherPlayer.Character then
+            local enemy = otherPlayer.Character
+            if isEnemyVisible(enemy) then
+                simulateTapOnEnemy(enemy)
+                break -- Only shoot one enemy at a time
+            end
+        end
+    end
+end)
+
+-- Reconnect if character respawns
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+    rootPart = character:WaitForChild("HumanoidRootPart")
+end)
+
+updateButtonAppearance()
